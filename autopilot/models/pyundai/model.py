@@ -22,6 +22,8 @@ MOB_NET_INPUT = tf.keras.Input(shape=MOB_NET_SHAPE)
 IM_SHAPE = (IM_HEIGHT, IM_WIDTH)
 
 
+
+
 def postprocess_speed(speed: float) -> int:
     speed_factor = 35
     speed_threshold = 0.2
@@ -60,7 +62,7 @@ class AbstractModel(ABC):
 
 class Model(AbstractModel):
     def __init__(self):
-        model_path = ""
+        model_path = os.path.join(os.getcwd(),"autopilot\models\pyundai\Pyundai_live_testing_model.h5")
         super().__init__()
         self.compile()
         self.model.load_weights(model_path)
@@ -85,12 +87,17 @@ class Model(AbstractModel):
             weights='imagenet'
         )
 
-        mob_net_model.trainable = False
+        # Finetuning....
+        mob_net_model.trainable = True
+        num_unfreeze = -1 * int(len(mob_net_model.layers) * 0.3) # 30% seems best, 50% got val loss of 0.03357, 30% got 0.03208
+        for layer in mob_net_model.layers[:num_unfreeze]:  # un freeze last 10% of model
+            layer.trainable = False
+        print(f"{num_unfreeze} layers unfrozen.")
 
-        eff_net_out = mob_net_model(MOB_NET_INPUT, training=False)
+        mob_net_out = mob_net_model(MOB_NET_INPUT, training=False)
 
         # Angle Branch
-        y = Flatten()(eff_net_out)
+        y = Flatten()(mob_net_out)
         y = Dropout(rate=0.3)(y)
         y = Dense(128, activation="elu")(y)
         y = Dropout(rate=0.15)(y)
@@ -101,7 +108,7 @@ class Model(AbstractModel):
         angle_out = Activation("linear", name="angle")(y)
 
         # Velocity Branch
-        z = Flatten()(eff_net_out)
+        z = Flatten()(mob_net_out)
         z = Dropout(rate=0.3)(z)
         z = Dense(128, activation="elu")(z)
         z = Dropout(rate=0.15)(z)
@@ -117,14 +124,12 @@ class Model(AbstractModel):
         return null_preprocess_fn(image)
 
     def predict(self, image):
-        angle, speed = self.model.predict(self.preprocess_image(image))
+        image = cv2.resize(image, (224,224))
+        image = np.expand_dims(image, axis = 0)
+        angle, speed = self.model.predict(image)
 
         output_speed = postprocess_speed(speed)
         output_angle = postprocess_angle(angle)
 
         return output_angle, output_speed
-
-
-
-
 
